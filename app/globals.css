@@ -479,3 +479,23 @@ body {
     opacity: 1;
   }
 }
+/* Custom dropdown styling */
+.hud-select {
+  background-color: rgba(8, 15, 28, 0.95);
+  border: 1px solid rgba(59, 130, 246, 0.3);
+  border-radius: 12px;
+  backdrop-filter: blur(12px);
+}
+
+.hud-select option {
+  background-color: #0a0f1c;
+  color: rgba(255, 255, 255, 0.8);
+  padding: 8px 12px;
+  font-size: 11px;
+  letter-spacing: 0.1em;
+}
+
+.hud-select option:hover {
+  background-color: rgba(59, 130, 246, 0.2);
+  color: white;
+}

@@ -20,6 +20,7 @@ interface Globe3DProps {
   onEventClick: (event: Event) => void;
   autoRotate: boolean;
   satView: boolean;
+  filterType: string;
   trackedEvent: Event | null;
 }
 
@@ -28,6 +29,7 @@ export default function Globe3D({
   onEventClick,
   autoRotate,
   satView,
+  filterType,
   trackedEvent,
 }: Globe3DProps) {
   const globeRef = useRef<any>(null);
@@ -55,29 +57,28 @@ export default function Globe3D({
     globeRef.current.pointOfView({ lat: 18, lng: 10, altitude: 2.05 }, 0);
   }, []);
 
-  // TRACK EVENT
+  // TRACK EVENT (from live feed click)
   useEffect(() => {
     if (!trackedEvent || !globeRef.current) return;
     globeRef.current.pointOfView(
       { lat: trackedEvent.latitude, lng: trackedEvent.longitude, altitude: 1.18 },
-      1800
+      1000
     );
   }, [trackedEvent]);
 
-  // Get color based on event type and severity
+  // Filter events based on selected type
+  const filteredEvents = filterType === 'all' 
+    ? events 
+    : events.filter(event => (event.event_type || 'earthquake') === filterType);
+
   const getEventColor = (event: Event): string => {
     const eventType = event.event_type || 'earthquake';
-    
     switch (eventType) {
-      case 'wildfire':
-        return '#ff4400';  // Bright red-orange
-      case 'volcano':
-        return '#ff6600';  // Magma orange
-      case 'storm':
-      case 'cyclone':
-        return '#44aaff';  // Storm blue
-      case 'flood':
-        return '#3399ff';  // Water blue
+      case 'wildfire': return '#ff4400';
+      case 'volcano': return '#ff6600';
+      case 'storm': return '#44aaff';
+      case 'flood': return '#3399ff';
+      case 'tsunami': return '#00e5ff';
       case 'earthquake':
       default:
         if (event.severity === 'high') return '#ff5533';
@@ -86,22 +87,19 @@ export default function Globe3D({
     }
   };
 
-  // Get size based on severity
   const getEventSize = (event: Event): number => {
     if (event.severity === 'high') return 90;
     if (event.severity === 'medium') return 65;
     return 42;
   };
 
-  // Get blur based on severity
   const getEventBlur = (event: Event): number => {
     if (event.severity === 'high') return 60;
     if (event.severity === 'medium') return 42;
     return 28;
   };
 
-  // SURFACE GLOW HOTSPOTS
-  const glowData = events.map((event) => ({
+  const glowData = filteredEvents.map((event) => ({
     ...event,
     size: getEventSize(event),
     blur: getEventBlur(event),
@@ -137,8 +135,7 @@ export default function Globe3D({
           const el = document.createElement('div');
           el.style.width = '1px';
           el.style.height = '1px';
-          el.style.pointerEvents = 'auto';
-          el.style.cursor = 'pointer';
+          el.style.pointerEvents = 'none';
 
           el.innerHTML = `
             <div
@@ -147,20 +144,25 @@ export default function Globe3D({
                 --glow-color:${d.color};
                 --glow-size:${d.size}px;
                 --glow-blur:${d.blur}px;
+                pointer-events: none;
               "
             >
-              <div class="surface-core"></div>
-              <div class="surface-glow"></div>
+              <div class="surface-core" style="pointer-events: auto; cursor: pointer;"></div>
+              <div class="surface-glow" style="pointer-events: none;"></div>
             </div>
           `;
 
-          el.onclick = () => {
-            onEventClick(d);
-            globeRef.current.pointOfView(
-              { lat: d.latitude, lng: d.longitude, altitude: 1.18 },
-              1600
-            );
-          };
+          const core = el.querySelector('.surface-core') as HTMLElement;
+          if (core) {
+            core.onclick = (e) => {
+              e.stopPropagation();
+              onEventClick(d);
+              globeRef.current.pointOfView(
+                { lat: d.latitude, lng: d.longitude, altitude: 1.18 },
+                1000
+              );
+            };
+          }
 
           return el;
         }}
