@@ -25,6 +25,7 @@ def get_event_hash(event):
     return hashlib.md5(unique_str.encode()).hexdigest()
 
 def is_in_ocean(lat, lon):
+    """Simple ocean check for tsunami generation"""
     if -60 < lat < 60:
         if (lon > -180 and lon < -30) or (lon > 20 and lon < 150) or (lon > 150 and lon < 180):
             return True
@@ -33,6 +34,7 @@ def is_in_ocean(lat, lon):
     return False
 
 def generate_tsunami(earthquake):
+    """Generate tsunami event from undersea earthquake > 6.5 magnitude"""
     mag = earthquake.get('magnitude', 0)
     lat = earthquake.get('latitude', 0)
     lon = earthquake.get('longitude', 0)
@@ -61,7 +63,8 @@ def fetch_earthquakes(since_time=None):
         "format": "geojson",
         "starttime": since_time.strftime("%Y-%m-%dT%H:%M:%S"),
         "minmagnitude": 2.5,
-        "orderby": "time"
+        "orderby": "time",
+        "limit": 100
     }
     
     response = requests.get(url, params=params)
@@ -94,6 +97,7 @@ def fetch_earthquakes(since_time=None):
         }
         events.append(event)
         
+        # Generate tsunami if conditions met
         tsunami = generate_tsunami(event)
         if tsunami:
             events.append(tsunami)
@@ -101,15 +105,16 @@ def fetch_earthquakes(since_time=None):
     return events
 
 def fetch_nasa_events():
+    """Fetch NASA events - last 7 days (not just 1 hour)"""
     url = "https://eonet.gsfc.nasa.gov/api/v3/events"
-    params = {"status": "open", "limit": 50}
+    params = {"status": "open", "limit": 100}
     
     response = requests.get(url, params=params)
     data = response.json()
     
     events = []
-    # FIX: Use timezone-aware datetime
-    one_hour_ago = datetime.now(timezone.utc) - timedelta(hours=1)
+    # Look back 7 days instead of 1 hour
+    cutoff_time = datetime.now(timezone.utc) - timedelta(days=7)
     
     for item in data.get('events', []):
         categories = [c.get('title', '').lower() for c in item.get('categories', [])]
@@ -142,12 +147,13 @@ def fetch_nasa_events():
         
         event_time = geometries[0].get('date', datetime.now(timezone.utc).isoformat())
         
-        # FIX: Handle timezone properly
+        # Handle timezone
         if event_time.endswith('Z'):
             event_time = event_time.replace('Z', '+00:00')
         event_dt = datetime.fromisoformat(event_time)
         
-        if event_dt < one_hour_ago:
+        # Include events from last 7 days
+        if event_dt < cutoff_time:
             continue
         
         events.append({
@@ -163,9 +169,11 @@ def fetch_nasa_events():
             "external_url": item.get('link', '')
         })
     
+    print(f"  🔥 NASA Events (last 7 days): {len(events)}")
     return events
 
 def fetch_weather_alerts():
+    """Fetch severe weather alerts - simplified"""
     regions = [
         {"name": "US Central", "lat": 39.83, "lon": -98.58},
         {"name": "Europe", "lat": 50.11, "lon": 8.68},
@@ -181,7 +189,6 @@ def fetch_weather_alerts():
             "latitude": region["lat"],
             "longitude": region["lon"],
             "current_weather": True,
-            "hourly": "windspeed_10m"
         }
         
         try:
@@ -208,9 +215,11 @@ def fetch_weather_alerts():
         except Exception as e:
             print(f"  ⚠️ Weather fetch failed for {region['name']}: {e}")
     
+    print(f"  🌪️ Weather Alerts: {len(events)}")
     return events
 
 def insert_new_events(events):
+    """Insert only new events not seen before"""
     if not events:
         return 0
     
@@ -224,13 +233,14 @@ def insert_new_events(events):
             supabase.table('events').insert(event).execute()
             seen_events.add(event_hash)
             inserted += 1
-            print(f"  🔴 LIVE: {event.get('event_type')} - {event.get('title', '')[:50]}")
+            print(f"  ✅ Inserted: {event.get('event_type')} - {event.get('title', '')[:50]}")
         except Exception as e:
-            print(f"  Error inserting: {e}")
+            print(f"  ❌ Error inserting: {e}")
     
     return inserted
 
 def cleanup_old_events():
+    """Delete events older than 2 days"""
     cutoff_time = (datetime.now(timezone.utc) - timedelta(days=2)).isoformat()
     result = supabase.table('events').delete().lt('event_time', cutoff_time).execute()
     if result.data:
@@ -239,8 +249,9 @@ def cleanup_old_events():
 if __name__ == "__main__":
     print("\n🌍 LIVE ETL STARTING (with Tsunami detection)")
     print("=" * 60)
-    print("Checking for earthquakes, NASA events, and weather alerts...\n")
+    print("Fetching earthquakes, NASA events, and weather alerts...\n")
     
+    # Load existing event hashes
     existing = supabase.table('events').select('event_type, latitude, longitude, event_time').execute()
     for e in existing.data:
         seen_events.add(get_event_hash(e))
@@ -258,16 +269,18 @@ if __name__ == "__main__":
             inserted = insert_new_events(earthquakes)
             
             if inserted > 0:
-                print(f"  ✅ {inserted} new events (earthquakes + tsunamis)")
+                print(f"  📊 {inserted} new earthquake/tsunami events")
             
             # Fetch NASA events every hour
             if now - last_nasa_fetch >= timedelta(hours=1):
+                print("\n  📡 Checking NASA...")
                 nasa_events = fetch_nasa_events()
                 insert_new_events(nasa_events)
                 last_nasa_fetch = now
             
             # Fetch weather alerts every 30 minutes
             if now - last_weather_fetch >= timedelta(minutes=30):
+                print("\n  📡 Checking weather...")
                 weather_events = fetch_weather_alerts()
                 insert_new_events(weather_events)
                 last_weather_fetch = now
